@@ -4,8 +4,11 @@ Available methods are the followings:
 [2] plot_rollrate
 [3] vintage_table
 [4] plot_vintage
-[5] avgdpd_table
+[5] groupby_table
 [6] plot_avgdpd
+[7] matplotlib_cmap
+[8] observed_rate
+[9] plot_scores
 
 Author: Danusorn Sitdhirasdr <danusorn.si@gmail.com>
 versionadded:: 30-05-2022
@@ -13,6 +16,7 @@ versionadded:: 30-05-2022
 '''
 import time
 from calendar import monthrange
+from scipy.interpolate import interp1d
 import pandas as pd, numpy as np
 from matplotlib.colors import (ListedColormap, 
                                LinearSegmentedColormap)
@@ -27,7 +31,33 @@ from matplotlib.ticker import(FixedLocator,
 
 __all__ = ["rollrate_table", "plot_rollrate", 
            "vintage_table" , "plot_vintage", 
-           "avgdpd_table"  , "plot_avgdpd"]
+           "groupby_table"  , "plot_avgdpd", 
+           "matplotlib_cmap", "create_mob",
+           "observed_rate", "plot_scores"]
+
+def matplotlib_cmap(name='viridis', n=10):
+
+    '''
+    Parameters
+    ----------
+    name : matplotlib Colormap str, default='viridis'
+        Name of a colormap known to Matplotlib. 
+    
+    n : int, defualt=10
+        Number of shades for defined color map.
+    
+    Returns
+    -------
+    colors : list of color-hex
+        List of color-hex codes from defined Matplotlib Colormap. 
+        Such list contains "n" shades.
+        
+    '''
+    c_hex = '#%02x%02x%02x'
+    c = cm.get_cmap(name)(np.linspace(0,1,n))
+    c = (c*255).astype(int)[:,:3]
+    colors = [c_hex % (c[i,0],c[i,1],c[i,2]) for i in range(n)]
+    return colors
 
 def delq_table(delq, values) -> pd.DataFrame:
     
@@ -163,7 +193,7 @@ def plot_rollrate(delq, mobs, values=None, ax=None, colors=None,
 
     # Create annotation (N, %)
     coords = [(r,c) for r in range(5) for c in range(5)]
-    args = (delq, mobs, values)
+    args = (delq.fillna(0).copy(), mobs, values)
     delq_cnt = rollrate_table(*args, False).values.T.ravel()
     delq_pct = rollrate_table(*args, True ).values.T.ravel()
     for n in range(25):
@@ -221,6 +251,7 @@ def plot_rollrate(delq, mobs, values=None, ax=None, colors=None,
     line = np.sort(np.r_[np.arange(-0.5,5),np.arange(-0.5,5)]) 
     ax.plot(line[:-3]+1, line[1:-2], lw=3, color="#2f3542")
     ax.plot(line[1:-2] , line[2:-1], lw=3, color="#2f3542")
+    ax.grid(False, which="both")
     if tight_layout: plt.tight_layout()
 
     return ax
@@ -229,9 +260,15 @@ def vintage_table(X, groupby, dpd_cols, dpd_geq=30):
     '''Vintage analysis'''
     groupby, dpd_cols = list(groupby), list(dpd_cols)
     new_X = X[groupby + dpd_cols].copy()
-    new_X[dpd_cols] = np.cumsum(new_X[dpd_cols].values>=dpd_geq,axis=1)>0
+    
+    a = new_X[dpd_cols].values.copy()
+    a = np.where(np.isnan(a), np.nan, a>=dpd_geq)
+    a = np.cumsum(a, axis=1)
+    new_X[dpd_cols] = np.where(np.isnan(a), np.nan, a>1)
+
     new_X["N"] = 1
-    aggfnc = {**{"N":"count"},**dict([(c,"mean") for c in dpd_cols])}
+    aggfnc = {**{"N":"count"},**dict([(c, np.nanmean) 
+                                      for c in dpd_cols])}
     return new_X.groupby(groupby).agg(aggfnc)
 
 def groupby_table(X, groupby, cols, agg=np.nanmean, factor=1):
@@ -322,7 +359,7 @@ def plot_vintage(X, groupby, dpd_cols, dpd_geq=30, start_mth=0,
     '''
     vintage = vintage_table(X, groupby, dpd_cols, dpd_geq).copy()
     n_lines, n_mths = len(vintage), len(dpd_cols)
-    x = np.arange(len(dpd_cols))
+    x = np.arange(n_mths)
 
     # Default parameters
     args = (plot_kwds, num_format, ax, 
@@ -330,7 +367,7 @@ def plot_vintage(X, groupby, dpd_cols, dpd_geq=30, start_mth=0,
     kwds, num_format, ax, colors = default_params(*args)
         
     # Find focus
-    dim, indices = find_focus(vintage, focus, n_tops, n_lines)
+    dim, indices = find_focus(vintage, focus, n_tops, n_lines, dpd_cols)
     ax , samples = draw_lines(ax, vintage, x, dpd_cols, groupby, 
                               n_lines, dim, indices, num_format, 
                               kwds, colors)
@@ -347,6 +384,7 @@ def plot_vintage(X, groupby, dpd_cols, dpd_geq=30, start_mth=0,
     # Draw focus line, and legend
     ax = draw_focus(ax, focus, dpd_cols)
     ax = draw_legend(ax, loc)
+    ax.grid(False, which="both")
     if tight_layout: plt.tight_layout()
         
     return ax
@@ -418,7 +456,7 @@ def plot_avgdpd(X, groupby, dpd_cols, start_mth=0, ax=None,
     # Get data table
     avgdpd = groupby_table(X, groupby, dpd_cols)
     n_lines, n_mths = len(avgdpd), len(dpd_cols)
-    x = np.arange(len(dpd_cols))
+    x = np.arange(n_mths)
 
     # Default parameters
     args = (plot_kwds, num_format, ax, 
@@ -426,7 +464,7 @@ def plot_avgdpd(X, groupby, dpd_cols, start_mth=0, ax=None,
     kwds, num_format, ax, colors = default_params(*args)   
         
     # Plot lines.
-    dim, indices = find_focus(avgdpd, focus, n_tops, n_lines)
+    dim, indices = find_focus(avgdpd, focus, n_tops, n_lines, dpd_cols)
     ax , samples = draw_lines(ax, avgdpd, x, dpd_cols, groupby, 
                               n_lines, dim, indices, num_format, 
                               kwds, colors)
@@ -444,12 +482,13 @@ def plot_avgdpd(X, groupby, dpd_cols, start_mth=0, ax=None,
     ax = draw_dpd(ax)
     ax = draw_focus(ax, focus, dpd_cols)
     ax = draw_legend(ax, loc)
+    ax.grid(False, which="both")
     if tight_layout: plt.tight_layout()
         
     return ax
 
-def default_params(plot_kwds, num_format, ax, colors, 
-                   n_lines, n_mths, loc):
+def default_params(plot_kwds, num_format, ax, colors, n_lines, 
+                   n_mths, loc):
     '''Private function: default parameters'''
     kwds = dict(linewidth=3, solid_capstyle='round', 
                 solid_joinstyle="round", markersize=7,
@@ -484,12 +523,16 @@ def draw_text(ax, n_samples, dpd_geq=None):
     '''Private function: draw text (top left corner)'''
     args = (ax.transAxes, ax.transAxes)
     trans= transforms.blended_transform_factory(*args)
-    if dpd_geq is None: text = []
-    else: text = [r"DPD $\geq$ " + "{:,d} day(s)".format(dpd_geq)]
-    text += ["N = {:,d}".format(n_samples)]
-    ax.text(0.01, 1, "\n".join(text), transform=trans, fontsize=13, 
-            va="top", ha="left", color="k", 
-            bbox=dict(pad=2, facecolor="w", edgecolor="none"))
+    
+    if dpd_geq is not None: 
+        text = r"N(dpd $\geq$ {:,d}) = "\
+        .format(int(dpd_geq))
+    else: text = "N = "
+
+    text += "{:,d}".format(n_samples)
+    ax.text(0.01, 1, text, transform=trans, fontsize=13, va="top", 
+            ha="left", color="k", bbox=dict(pad=2, facecolor="w", 
+                                            edgecolor="none"))
     return ax
 
 def draw_dpd(ax):
@@ -505,14 +548,13 @@ def draw_dpd(ax):
                     va="bottom", ha="left", color="#cccccc", zorder=-1)
     return ax
 
-def set_axes(ax, x, start_mth, ylabel, xlabel="Months on book", 
+def set_axes(ax, x, start_mth=0, ylabel="", xlabel="Months on book", 
              percent=True):
     '''Private function: set properties of x, and y axes'''
     y_min, y_max = ax.get_ylim() 
     ax.set_ylim(y_min, y_max/0.85)
     for s in ["right","top"]:ax.spines[s].set_visible(False) 
     ax.set_xticks(x + start_mth)
-    # ax.set_xticklabels(x + start_mth)
     ax.set_xlabel(xlabel, fontsize=13, fontweight=600)
     ax.set_ylabel(ylabel, fontsize=13, fontweight=600)
     ax.yaxis.set_major_locator(mpl.ticker.MaxNLocator(5))
@@ -524,7 +566,7 @@ def set_axes(ax, x, start_mth, ylabel, xlabel="Months on book",
         ax.yaxis.set_major_formatter(t)
     return ax
 
-def find_focus(data, focus, n_tops, n_lines):
+def find_focus(data, focus, n_tops, n_lines, dpd_cols):
     '''Private Function: find focus'''
     if focus is not None:
         if focus in dpd_cols:
@@ -557,6 +599,116 @@ def draw_legend(ax, loc):
         legend.set_bbox_to_anchor([1,1], transform=ax.transAxes)
     else: ax.legend(loc=loc, **kwds)
     return ax
+
+def observed_rate(X, scr_col, dpd_cols, val_cols, cr_lmt, dpd_geq=60, 
+                  bins=None, factor=1):
+    
+    # Score bin edges
+    bins ="fd" if bins is None else bins 
+    scrs = X[scr_col].fillna(0).values.copy()
+    bins = np.histogram_bin_edges(scrs, bins)
+    bins = np.round(bins,0).astype(int)
+    bins[[0,-1]] = 1, bins[-1] + 1
+    cat = dict([(n,c) for n,c in enumerate(bins)])
+    # right=False, bins[i-1] <= x < bins[i]
+    indices = np.digitize(scrs, bins)
+
+    # Month indices
+    mths = X[dpd_cols].values.copy()
+    mths[np.isnan(mths)==False] = 1
+    
+    # Observed rate
+    ones = np.ones((len(scrs),1))
+    delq = mths * (X[dpd_cols]>=dpd_geq).values
+    data = np.hstack((indices.reshape(-1,1), ones, delq))
+    data = pd.DataFrame(data, columns=["bin_lt","N"]+dpd_cols)
+    data["bin_lt"] = data["bin_lt"].apply(lambda x: cat[x])
+    aggfunc = dict([("N","sum")]+[(c,"sum") for c in dpd_cols])
+    delq = data.groupby("bin_lt").agg(aggfunc).astype(int)
+    
+    # Exposure
+    lmts = X[cr_lmt].values.reshape(-1,1)
+    vals = mths * np.where((X[dpd_cols]>=dpd_geq),X[val_cols],0)
+    data = np.hstack((indices.reshape(-1,1), lmts, vals))
+    data = pd.DataFrame(data, columns=["bin_lt","cr_limit"] + val_cols)
+    data["bin_lt"] = data["bin_lt"].apply(lambda x: cat[x])
+    aggfunc = dict([("cr_limit","sum")]+[(c,"sum") for c in val_cols])
+    vals = data.groupby("bin_lt").agg(aggfunc) * factor
+
+    return delq, vals, bins
+
+def plot_scores(data, ylabel, percent=False, ax=None, num_format=None, colors=None, 
+                plot_kwds=None, tight_layout=True, loc=None):
+    
+    cols = data.columns[data.columns.str.contains("M")]
+    base = data.columns[data.columns.str.contains("|".join(("N","cr_")))][0]
+    if percent==False: base=None
+    n_lines, n_pts = len(cols), len(data)
+    args = (plot_kwds, num_format, ax, colors, n_lines, n_pts, loc)
+    kwds, num_format, ax, colors = get_params(*args)
+    ax = plot_lines(ax, data, cols, num_format, kwds, colors, base)
+    ax = draw_legend(ax, loc)
+    ax = set_xaxis(ax, data)
+    ax = set_yaxis(ax, data, percent, ylabel)
+    ax = set_params(ax)
+    if tight_layout: plt.tight_layout()
+    return ax
+
+def get_params(plot_kwds, num_format, ax, colors, n_lines, n_pts, loc):
+    '''Private function: default parameters'''
+    kwds = dict(linewidth=2.5, solid_capstyle='round', 
+                solid_joinstyle="round", markersize=7,
+                markeredgewidth=1, marker="s")
+    if plot_kwds is not None: kwds.update(plot_kwds)
+    if num_format is None: num_format = "{:,.0f}".format  
+    if ax is None: 
+        width = max(5, n_pts*0.45) + (2 if loc is None else 0)
+        ax = plt.subplots(figsize=(width, 4))[1]
+    if colors is not None: colors = color_map(colors, n_lines)
+    return kwds, num_format, ax, colors
+
+def plot_lines(ax, data, cols, num_format, kwds, colors, base=None):
+    '''Private function: plot lines'''
+    x = np.arange(1,len(data)+1) - 0.5
+    if base is None:
+        base, total = np.ones(len(data)), 1
+    else: base, total = data[base].values, sum(data[base])
+    for n,col in enumerate(cols):
+        y, N = data[col], sum(data[col])/total
+        label = "{} ({})".format(col, num_format(N))
+        if colors is not None: kwds.update({"color":colors[n]})
+        ax.plot(x, y/base, label=label, **kwds)
+    return ax
+
+def set_xaxis(ax, data, label="FICO Scores"):
+    '''Private function: set x-axis properties'''
+    xticklabels = np.r_[0, np.array(data.index)]
+    ax.set_xticks(np.arange(0, len(data)+1))
+    ax.set_xticklabels(xticklabels, fontsize=12)
+    ax.set_xlabel(label, fontsize=13, fontweight=600)
+    ax.set_xlim(-0.2, len(xticklabels)-0.7)
+    return ax
+
+def set_yaxis(ax, data, percent=True, label="Proportion"):
+    '''Private function: set y-axis properties'''
+    y_min, y_max = ax.get_ylim() 
+    ax.set_ylim(y_min, y_max/0.95)
+    ax.set_ylabel(label, fontsize=13, fontweight=600)
+    ax.yaxis.set_major_locator(mpl.ticker.MaxNLocator(5))
+    ax.tick_params(axis='y', labelsize=12)
+    if percent:
+        t = mpl.ticker.PercentFormatter(xmax=1, decimals=1)
+        ax.yaxis.set_major_formatter(t)
+    return ax
+
+def set_params(ax):
+    for s in ["right","top"]:ax.spines[s].set_visible(False) 
+    ax.set_facecolor('white')
+    ax.patch.set_alpha(0)
+    return ax
+
+import pandas as pd, numpy as np, time
+from calendar import monthrange
 
 def create_mob(X, dt_fmt="%d-%m-%y %H:%M"):
     
@@ -644,3 +796,5 @@ def label_format(a, d=2):
 def find_digit(a):
     if pow(10,np.log10(a))==a: return int(np.log10(a)+1)
     else:return int(np.ceil(np.log(a)/np.log(10)))
+
+## Example
