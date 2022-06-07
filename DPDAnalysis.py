@@ -707,10 +707,7 @@ def set_params(ax):
     ax.patch.set_alpha(0)
     return ax
 
-import pandas as pd, numpy as np, time
-from calendar import monthrange
-
-def create_mob(X, dt_fmt="%d-%m-%y %H:%M"):
+def create_mob(X, dt_fmt="%d-%m-%y %H:%M", digit=2):
     
     start_time = time.time()    
     # Required fields
@@ -743,9 +740,9 @@ def create_mob(X, dt_fmt="%d-%m-%y %H:%M"):
     X["pnpamts"] = [a for a in zip(X[dt2], X["pnp_amt"])]
     
     # Aggregate functions
-    aggfunc = {"dlq_day": create_cols(start, end), 
-               "os_bals": create_cols(start, end),
-               "pnpamts": create_cols(start, end, [0,1,2])}
+    aggfunc = {"dlq_day": create_cols(start, max(end,2)), 
+               "os_bals": create_cols(start, max(end,2)),
+               "pnpamts": create_cols(start, max(end,2), [0,1,2])}
     
     # Column fomats for `aggfnc`
     colfmts = {"dlq_day": "M{}".format, 
@@ -753,7 +750,8 @@ def create_mob(X, dt_fmt="%d-%m-%y %H:%M"):
                "pnpamts": "M{}_PNP".format}
     
     # Convert results to pd.DataFrame
-    m_data, columns, d = [], [], find_digit(end)
+    m_data, columns = [], []
+    d = digit if isinstance(digit, int) else find_digit(end)
     group = X.groupby(["ip_id","apl_grp_no"])\
     .agg(aggfunc).reset_index()
     for key in aggfunc.keys():
@@ -796,5 +794,3 @@ def label_format(a, d=2):
 def find_digit(a):
     if pow(10,np.log10(a))==a: return int(np.log10(a)+1)
     else:return int(np.ceil(np.log(a)/np.log(10)))
-
-## Example
