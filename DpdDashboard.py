@@ -5,6 +5,7 @@ Available methods are the followings:
 [3] dashboard_rollrate
 [4] dashboard_dpdbins
 [5] dashboard_pivottable
+[6] export_data
 
 Author: Danusorn Sitdhirasdr <danusorn.si@gmail.com>
 versionadded:: 30-06-2022
@@ -14,12 +15,13 @@ from ipywidgets import (interact, fixed, IntSlider, Dropdown,
                         FloatSlider, SelectionRangeSlider, Checkbox,
                         widgets, SelectMultiple, Label, HTMLMath,
                         interactive_output, HBox, VBox, Accordion, 
-                        SelectionSlider)
+                        SelectionSlider, Button, Text, HTML)
 from IPython.display import display
 from calendar import month_abbr as abbr
 import pandas as pd, numpy as np, os
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import time
 from collections import namedtuple
 from itertools import product
 from DpdAnalysis import *
@@ -28,7 +30,8 @@ __all__ = ["dashboard_avgdpd",
            "dashboard_vintage",
            "dashboard_rollrate",
            "dashboard_dpdbins",
-           "dashboard_pivottable"]
+           "dashboard_pivottable",
+           "export_data"]
 
 def initial_parmas(X):
     columns  = np.r_[list(X)]
@@ -85,8 +88,8 @@ def widget_mob(dpd_cols):
     return VBox([Label("Number of Months-On-Book (MOB)"), 
                  IntSlider(**kwds)])
 
-def widget_focus(dpd_cols):
-    kwds = dict(value=-1, min=-1, max=len(dpd_cols)-1, step=1)
+def widget_focus(dpd_cols, value=-1, min=-1):
+    kwds = dict(value=value, min=min, max=len(dpd_cols)-1, step=1)
     return VBox([Label("Focus on which MOB"), 
                  IntSlider(**kwds)])
 
@@ -176,6 +179,22 @@ def widget_states():
     return VBox([Label("Type of states"), 
                  Dropdown(options=states, 
                           value=states[0])])
+def widget_savetype():
+    types = ["*.xlsx","*.csv","*.txt (sep=|)"] 
+    return VBox([Label("Save as type"), 
+                 Dropdown(options=types, 
+                          value=types[-1])])
+
+def widget_filename():
+    return VBox([Label("File name (default=asof_YYYYMMDD_HHMMSS)"), 
+                 Text(placeholder=' Type file name ',
+                      disabled=False)])
+
+def widget_folder():
+    return VBox([Label("Folder path"), 
+                 Text(value=os.getcwd(),
+                      placeholder=' Type folder path ',
+                      disabled=False)])
 
 def get_UI01(X):
     
@@ -708,7 +727,7 @@ def db_dpdbins_base(**params):
     focus, X = params.focus, params.X
     sta_cohort, end_cohort = params.sta_end
     cohorts = params.cohorts
-    
+
     # Determine starting and ending months
     keys = np.array(list(cohorts.keys()))
     sta_mth = np.argmax(keys==sta_cohort)
@@ -753,8 +772,8 @@ def db_dpdbins_base(**params):
     else: print("No <MOB> selected.")
 
 def dashboard_dpdbins(X):
-    ui, values = get_UI04(X)
-    display(ui, interactive_output(db_dpdbins_base, values))
+    ui04, values = get_UI04(X)
+    display(ui04, interactive_output(db_dpdbins_base, values))
 
 def get_UI05(X):
     
@@ -874,3 +893,144 @@ def db_pivottable_base(**params):
 def dashboard_pivottable(X):
     ui, values = get_UI05(X)
     display(ui, interactive_output(db_pivottable_base, values))
+
+def get_UI06(X):
+    
+    # ======================= #
+    # Create criteria widgets #
+    # ======================= #
+    osb_cols, dpd_cols, cohorts = initial_parmas(X)
+    sta_end   = widget_start_end(cohorts) # Starting and ending cohorts
+    products  = widget_products(X["pd_lvl2"]) # Products
+    customers = widget_customers(X["cust_type"]) # Customers
+    channels  = widget_channels(X["apl_grp_type"]) # Channels
+    fico_scor = widget_ficoscore(0, 1050, 50) # FICO scores
+    focus     = widget_focus(dpd_cols, value=0, min=0) # Focus on which MOB
+    states    = widget_states()
+    ever_dlq  = widget_cleanstatus() # Ever-delinquent
+    delq = widget_delq(0, 0, 150, 1) # Delinquency (days)
+    folder    = widget_folder()
+    filename  = widget_filename()
+    savetype  = widget_savetype()
+
+    # Dictionary of inputs ==> dashboard
+    values = {"sta_end"      : sta_end.children[1], 
+              "pd_lvl2"      : products.children[1], 
+              "cust_type"    : customers.children[1], 
+              "apl_grp_type" : channels.children[1], 
+              "fico_scor"    : fico_scor.children[1], 
+              "focus"        : focus.children[1],
+              "state"        : states.children[1],
+              "clean"        : ever_dlq.children[1],
+              "delq"         : delq.children[1],
+              "cohorts"      : fixed(cohorts), 
+              "X"            : fixed(X.copy()), 
+              "dpd_cols"     : fixed(dpd_cols), 
+              "folder"       : folder.children[1],
+              "filename"     : filename.children[1],
+              "savetype"     : savetype.children[1]}
+    
+    # Layout
+    children = [HBox([VBox([sta_end, ever_dlq, delq]), 
+                      VBox([products, customers, channels]), 
+                      VBox([fico_scor, focus, states])]),
+                VBox([folder, filename, savetype])]
+    
+    tab_nest = widgets.Tab()
+    tab_nest.children = children
+    tab_nest.selected_index = 0
+    tab_nest.set_title(0, 'Data Filtering')
+    tab_nest.set_title(1, 'Export Options')
+    return tab_nest, values
+
+def db_saveas_base(**params):
+        
+    # Initialize parameters
+    params = namedtuple("params",params.keys())(**params)
+    dpd_cols = np.array(params.dpd_cols)
+    focus, X = params.focus, params.X
+    
+    # Determine starting and ending months
+    sta_cohort, end_cohort = params.sta_end
+    cohorts = params.cohorts
+    keys = np.array(list(cohorts.keys()))
+    sta_mth = np.argmax(keys==sta_cohort)
+    end_mth = np.argmax(keys==end_cohort) + 1
+    values  = np.array(list(cohorts.values())) 
+    cond = X["cohort"].isin(values[sta_mth:end_mth])
+    
+    # State
+    states = ["x=0", "0<x<=30", "30<x<=60", "60<x<=90", "x>90"]
+    state = np.argmax(np.isin(states, params.state)) + 1
+    bins = np.array([-np.inf, 0., 30, 60., 90., np.inf])
+    # right=True ==> bins[i-1] < x <= bins[i]
+    delq = X[dpd_cols[focus]].values.ravel()
+    delq = np.digitize(delq, bins, right=True)
+    cond &= delq==state
+    
+    # Ever delinquent
+    a = X[dpd_cols].values
+    a = np.where(np.isnan(a), np.nan, a>= params.delq)
+    a = (np.nan_to_num(np.cumsum(a, axis=1))>0).sum(1)
+    cond &= a>0
+
+    # FICO scores.
+    min_scr, max_scr = params.fico_scor
+    scr = X["fico_scor"].fillna(0)
+    cond &= ((scr>=min_scr) & (scr<=max_scr))
+    
+    # Other conditions.
+    keys = ["pd_lvl2", "cust_type", "apl_grp_type", "clean"]
+    map_clean = {"Yes":False, "No (clean)":True}
+    for key in keys: 
+        value = getattr(params, key)
+        if value!="All":
+            if key!="clean":cond &= (X[key]==value)
+            else: cond &= (X[key]==map_clean[value]) 
+    
+    # Number of records given filtering criteria
+    print("Number of records: {:,d}".format(sum(cond)))
+    globals()["__final__"] = X.loc[cond].reset_index(drop=True).copy()
+    
+    folder   = params.folder 
+    filename = params.filename
+    t = time.strftime("%Y%M%d_%H%M%S", time.gmtime(time.time()))
+    filename = f"asof_{t}" if filename=="" else filename
+    savetype = dict([("*.txt (sep=|)","txt"),("*.xlsx","xlsx"), 
+                     ("*.csv","csv"),])[params.savetype] 
+    globals()["__folder__"] = folder
+    globals()["__filename__"] = "{}.{}".format(filename, savetype)
+    globals()["__filetype__"] = savetype
+
+def export_data(X):
+    ui06, values = get_UI06(X)
+    button = Button(description="Export Data")
+    label1, label2 = HTML(value=""), HTML(value="")
+
+    def on_button_clicked(a):
+
+        folder = globals()["__folder__"]
+        filename = globals()["__filename__"] 
+
+        if os.path.isdir(folder)==False:
+            label1.value = "".join((f"<b><font color='red'>ERROR: ",
+                                    f"Invalid file path</b>", 
+                                    f" <font color='black'>({folder})</font>"))        
+            label2.value = ""
+        else:
+            X = globals()["__final__"]
+            savetype = globals()["__filetype__"]
+            filepath = "{}\{}".format(folder, filename)
+
+            text = "Numer of records: {:,d}".format(len(X))
+            label1.value = f"<b><font color='blue'>{text}</b>"
+            label2.value = f"<b><font color='green'>Successfully saved: {filename}</b>"
+
+            if savetype=="csv"  : X.to_csv(filepath, index=False)
+            elif savetype=="xlsx": X.to_excel(filepath, sheet_name="data", index=False)
+            else: X.to_csv(filepath, sep="|", encoding="utf-8", index=False)
+            del X, globals()["__final__"]
+
+    button.on_click(on_button_clicked)
+    display(ui06, VBox([button, label1, label2]), 
+            interactive_output(db_saveas_base, values))
