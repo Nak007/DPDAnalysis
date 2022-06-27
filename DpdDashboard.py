@@ -6,6 +6,7 @@ Available methods are the followings:
 [4] dashboard_dpdbins
 [5] dashboard_pivottable
 [6] export_data
+[7] dashboard_kpicohort
 
 Author: Danusorn Sitdhirasdr <danusorn.si@gmail.com>
 versionadded:: 30-06-2022
@@ -31,7 +32,8 @@ __all__ = ["dashboard_avgdpd",
            "dashboard_rollrate",
            "dashboard_dpdbins",
            "dashboard_pivottable",
-           "export_data"]
+           "export_data", 
+           "dashboard_kpicohort"]
 
 def initial_parmas(X):
     columns  = np.r_[list(X)]
@@ -195,6 +197,15 @@ def widget_folder():
                  Text(value=os.getcwd(),
                       placeholder=' Type folder path ',
                       disabled=False)])
+
+def widget_cohortstates():
+    options = ["30+ at M02", 
+               "60+ at M03",
+               "90+ at M04", 
+               "90+ current month", "All"]
+    return VBox([Label("KPI"), 
+                 Dropdown(options=options , 
+                          value=options[-1])])
 
 def get_UI01(X):
     
@@ -1034,3 +1045,88 @@ def export_data(X):
     button.on_click(on_button_clicked)
     display(ui06, VBox([button, label1, label2]), 
             interactive_output(db_saveas_base, values))
+
+def get_UI07(X):
+    
+    # ======================= #
+    # Create criteria widgets #
+    # ======================= #
+    osb_cols, dpd_cols, cohorts = initial_parmas(X)
+    sta_end   = widget_start_end(cohorts) # Starting and ending cohorts
+    products  = widget_products(X["pd_lvl2"]) # Products
+    customers = widget_customers(X["cust_type"]) # Customers
+    channels  = widget_channels(X["apl_grp_type"]) # Channels
+    fico_scor = widget_ficoscore(0, 1050, 50) # FICO scores
+    states    = widget_cohortstates()
+    width     = widget_width(10.5, 1, 20, 0.1) # figure ==> width
+    height    = widget_height(6.0, 1, 20, 0.1) # figure ==> height
+
+    # Dictionary of inputs ==> dashboard
+    values = {"sta_end"      : sta_end.children[1], 
+              "pd_lvl2"      : products.children[1], 
+              "cust_type"    : customers.children[1], 
+              "apl_grp_type" : channels.children[1], 
+              "fico_scor"    : fico_scor.children[1], 
+              "state"        : states.children[1],
+              "cohorts"      : fixed(cohorts), 
+              "X"            : fixed(X.copy()), 
+              "dpd_cols"     : fixed(dpd_cols), 
+              "width"        : width.children[1],
+              "height"       : height.children[1]}
+    
+    # Layout
+    children = [HBox([VBox([sta_end, fico_scor, states]), 
+                      VBox([products, customers, channels])]),
+                VBox([width, height])]
+    
+    tab_nest = widgets.Tab()
+    tab_nest.children = children
+    tab_nest.selected_index = 0
+    tab_nest.set_title(0, 'Data Filtering')
+    tab_nest.set_title(1, 'Plot options')
+    return tab_nest, values
+
+def db_cohort_base(**params):
+        
+    # Initialize parameters
+    params = namedtuple("params",params.keys())(**params)
+    dpd_cols = np.array(params.dpd_cols)
+    X =  params.X
+    figsize = (params.width, params.height)
+    
+    # Determine starting and ending months
+    sta_cohort, end_cohort = params.sta_end
+    cohorts = params.cohorts
+    keys = np.array(list(cohorts.keys()))
+    sta_mth = np.argmax(keys==sta_cohort)
+    end_mth = np.argmax(keys==end_cohort) + 1
+    values  = np.array(list(cohorts.values())) 
+    cond = X["cohort"].isin(values[sta_mth:end_mth])
+    
+    # State
+    states = {"30+ at M02": "kpi30", 
+              "60+ at M03": "kpi60",
+              "90+ at M04": "kpi90", 
+              "90+ current month": "kpi90c", 
+              "All": "all"}
+    state = states[params.state]
+   
+    # FICO scores.
+    min_scr, max_scr = params.fico_scor
+    scr = X["fico_scor"].fillna(0)
+    cond &= ((scr>=min_scr) & (scr<=max_scr))
+    
+    # Other conditions.
+    keys = ["pd_lvl2", "cust_type", "apl_grp_type"]
+    for key in keys: 
+        value = getattr(params, key)
+        if value!="All": cond &= (X[key]==value) 
+    
+    # Ploy's work to be continued
+    # X.loc[cond].copy()
+    print(figsize, sta_cohort, end_cohort, state)
+    print("number of records : {:,d}".format(sum(cond)))
+
+def dashboard_kpicohort(X):
+    ui7, values = get_UI07(X)
+    display(ui7, interactive_output(db_cohort_base, values))
