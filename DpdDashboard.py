@@ -665,7 +665,8 @@ def db_rollrate_base(**params):
         for opt,ax in zip(options, axes):    
             if opt=='Roll-rate plot (Count)':
                 ax0 = plot_rollrate(X.loc[cond].copy(), ["n_prev","n_curr"], 
-                                   labels=[xlabel, ylabel], ax=ax)
+                                   labels=[xlabel, ylabel], ax=ax, 
+                                    tight_layout=False)
                 title = ["Number of applications ({:,.0f})".format(sum(cond)), 
                          "cohort : {}".format(params.which)]
                 ax0.set_title("\n".join(title), fontsize=20)
@@ -674,7 +675,8 @@ def db_rollrate_base(**params):
                 values = X.loc[cond, a_curr].fillna(0)/10**6
                 ax1 = plot_rollrate(X.loc[cond].copy(), ["n_prev", "n_curr"], 
                                     labels=[xlabel, ylabel], ax=ax, 
-                                    values=values,num_format="{:,.1f}".format)
+                                    values=values,num_format="{:,.1f}".format, 
+                                   tight_layout=False)
                 title = ["O/S as of {} = {:,.1f}MB".format(n_curr[0], sum(values)), 
                          "cohort : {}".format(params.which)]
                 ax1.set_title("\n".join(title), fontsize=20)
@@ -1121,6 +1123,10 @@ def db_cohort_base(**params):
     for key in keys: 
         value = getattr(params, key)
         if value!="All": cond &= (X[key]==value) 
+    
+    
+    
+    
     
     # Ploy's work to be continued
     # X.loc[cond].copy()

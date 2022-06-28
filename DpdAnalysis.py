@@ -813,7 +813,7 @@ def pivot_table(X, index, columns, mob=2, state=1,
         name+= list(a.columns.names)[1:]
         label  = ("MOB: {:,d} | State: {}".format(mob, state),)
         tuples = [label+s[1:] for s in list(a.columns)]
-        a.columns = pd.MultiIndex.from_tuples(tuples, name=name)
+        a.columns = pd.MultiIndex.from_tuples(tuples, names=name)
 
         if applyformat:
             num = ("{:,." + str(decimal) + "f}").format
