@@ -79,7 +79,7 @@ def delq_table(delq, values) -> pd.DataFrame:
     delq = np.select([delq==n for n in range(len(bins))], states, -1)
     delq = pd.DataFrame(delq, columns=columns)
     if values is None: delq["value"] = 1
-    else: delq["value"] = values
+    else: delq["value"] = np.array(values)
 
     dummy = dict([(c,states) for c in columns])
     dummy.update({"value": np.zeros(len(states))})
