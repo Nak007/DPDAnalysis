@@ -1,8 +1,0 @@
-from win32com.client import Dispatch
-
-def xls_copyas(folder, old, new):
-    xl = Dispatch("Excel.Application")
-    xl.Visible = False
-    wb = xl.Workbooks.Open(folder + old)
-    wb.SaveCopyAs(folder + new)
-    wb.Close(SaveChanges=False)
